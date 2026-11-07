@@ -3,36 +3,33 @@ name: RDP-32GB
 on:
   workflow_dispatch:
     inputs:
-      runner_type:
-        description: 'Choose Runner Specs'
-        required: true
-        default: 'windows-latest-8-cores'
-        type: choice
-        options:
-          - 'windows-latest-8-cores'
-          - 'windows-latest-16-cores'
-          - 'windows-latest'
       tailscale_key:
         description: 'Tailscale Auth Key (optional if TAILSCALE_AUTH_KEY is set in repo secrets)'
         required: false
         default: ''
 
 jobs:
-  high-spec-rdp:
-    runs-on: ${{ github.event.inputs.runner_type || 'windows-latest-8-cores' }}
+  rdp-32gb:
+    runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: System Specs Summary
+      - name: Optimize & Expand Virtual Memory to 32GB
         run: |
+          Write-Host "Configuring 32GB Total Memory Pool (Physical + NVMe Pagefile)..."
+          # Disable automatic pagefile management
+          $system = Get-CimInstance Win32_ComputerSystem
+          $system.AutomaticManagedPagefile = $false
+          Set-CimInstance -InputObject $system
+
+          # Set Pagefile on C: drive to 16384MB - 32768MB (32GB)
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @("C:\pagefile.sys 16384 32768")
+
           $os = Get-CimInstance Win32_OperatingSystem
-          $totalRamGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
-          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
-          Write-Host "=========================================="
-          Write-Host "Processor: $($cpu.Name) ($($cpu.NumberOfCores) Cores / $($cpu.NumberOfLogicalProcessors) Threads)"
-          Write-Host "Total RAM: $totalRamGB GB"
-          Write-Host "OS       : $($os.Caption)"
-          Write-Host "=========================================="
+          $totalRam = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
+          $totalVirtual = [math]::Round($os.TotalVirtualMemorySize / 1MB, 2)
+          Write-Host "Physical RAM        : $totalRam GB"
+          Write-Host "Total Memory Pool   : $totalVirtual GB"
 
       - name: Configure Core RDP Settings
         run: |
@@ -121,14 +118,15 @@ jobs:
       - name: Maintain Connection
         run: |
           Write-Host "`n=========================================="
-          Write-Host "       32GB / 64GB RDP CREDENTIALS        "
+          Write-Host "             32GB RDP ONLINE              "
           Write-Host "=========================================="
           Write-Host "Address  : $env:TAILSCALE_IP"
           Write-Host "Username : RDP"
           Write-Host "Password : $env:RDP_PASS"
+          Write-Host "Memory   : 32 GB Available Memory Pool"
           Write-Host "==========================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Active - Runner is running..."
+              Write-Host "[$(Get-Date -Format 'HH:mm:ss')] 32GB RDP Active - Runner is running..."
               Start-Sleep -Seconds 300
           }
