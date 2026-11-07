@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       tailscale_key:
-        description: 'Tailscale Auth Key (optional if TAILSCALE_AUTH_KEY is set in repo secrets)'
-        required: false
+        description: 'Tailscale Auth Key (must start with tskey-auth-)'
+        required: true
         default: ''
 
 jobs:
@@ -17,12 +17,10 @@ jobs:
       - name: Optimize & Expand Virtual Memory to 32GB
         run: |
           Write-Host "Configuring 32GB Total Memory Pool (Physical + NVMe Pagefile)..."
-          # Disable automatic pagefile management
           $system = Get-CimInstance Win32_ComputerSystem
           $system.AutomaticManagedPagefile = $false
           Set-CimInstance -InputObject $system
 
-          # Set Pagefile on C: drive to 16384MB - 32768MB (32GB)
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @("C:\pagefile.sys 16384 32768")
 
           $os = Get-CimInstance Win32_OperatingSystem
@@ -78,18 +76,33 @@ jobs:
               $authKey = $env:TS_SECRET_KEY
           }
           if (-not $authKey) {
-              Write-Error "CRITICAL: Tailscale Auth Key is missing! Please provide it in the 'Run workflow' box or add secret 'TAILSCALE_AUTH_KEY' in repository settings."
+              Write-Error "CRITICAL: Tailscale Auth Key is missing! Please provide it in the 'Run workflow' box."
+              exit 1
+          }
+
+          $authKey = $authKey.Trim()
+          if ($authKey -like "tskey-api-*") {
+              Write-Error "ERROR: You provided an API Key! Tailscale needs an AUTH KEY (starts with tskey-auth-). Go to https://login.tailscale.com/admin/settings/keys and click 'Generate auth key'."
               exit 1
           }
 
           $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
-          & $tsPath up --authkey=$authKey --hostname="gh-rdp32-$env:GITHUB_RUN_ID"
+          Write-Host "Authenticating with Tailscale..."
+          $upOutput = & $tsPath up --authkey=$authKey --hostname="gh-rdp32-$env:GITHUB_RUN_ID" 2>&1
+          Write-Host $upOutput
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "Tailscale connection failed. Please ensure you are using a valid Auth Key from https://login.tailscale.com/admin/settings/keys."
+              exit 1
+          }
           
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 15) {
-              $tsIP = (& $tsPath ip -4).Trim()
-              if ($tsIP) { break }
+              $rawIp = & $tsPath ip -4 2>$null
+              if ($rawIp) {
+                  $tsIP = $rawIp.ToString().Trim()
+                  if ($tsIP) { break }
+              }
               Start-Sleep -Seconds 4
               $retries++
           }
